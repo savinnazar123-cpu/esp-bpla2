@@ -1,130 +1,218 @@
---[=[
-    SWILL ESP HUD (Players & Drones Toggle)
-    Optimized for Delta Executor
---]=]
+local player = game.Players.LocalPlayer
+local mouse = player:GetMouse()
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
-local Fluent = loadstring(game:HttpGet("https://github.com"))()
+local telekinesisActive = false
+local heldPart = nil
+local holdDistance = 15
+local bv, bg
 
-local Window = Fluent:CreateWindow({
-    Title = "SWILL ESP | БПЛА",
-    SubTitle = "by Swill Way",
-    TabWidth = 160,
-    Size = Vector2.new(580, 460),
-    Acrylic = false,
-    Theme = "Dark",
-    MinimizeKey = Enum.KeyCode.LeftControl
-})
+-- ===== GUI =====
+local gui = Instance.new("ScreenGui")
+gui.Name = "TelekinesisGui"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
 
-local Tabs = {
-    ESP = Window:AddTab({ Title = "Визуалы (ESP)", Icon = "eye" })
-}
+local panel = Instance.new("Frame")
+panel.Size = UDim2.new(0, 220, 0, 90)
+panel.Position = UDim2.new(0, 20, 0.6, 0)
+panel.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+panel.BackgroundTransparency = 0.1
+panel.BorderSizePixel = 0
+panel.Active = true
+panel.Draggable = false -- своя реализация ниже (работает и на тач, и на мыши)
+panel.Parent = gui
 
--- Конфигурация переключателей
-local ESP_Settings = {
-    Players = false,
-    Drones = false,
-    PlayerColor = Color3.fromRGB(0, 255, 100), -- Зеленый для людей
-    DroneColor = Color3.fromRGB(255, 50, 50)   -- Красный для дронов
-}
+local panelCorner = Instance.new("UICorner")
+panelCorner.CornerRadius = UDim.new(0, 18)
+panelCorner.Parent = panel
 
--- Таблицы для хранения активных обводок
-local ActivePlayerESP = {}
-local ActiveDroneESP = {}
+local panelStroke = Instance.new("UIStroke")
+panelStroke.Color = Color3.fromRGB(150, 100, 255)
+panelStroke.Thickness = 1.5
+panelStroke.Parent = panel
 
--- Функция очистки ESP
-local function removeHighlight(object, tableRef)
-    if tableRef[object] then
-        if tableRef[object].Highlight then
-            tableRef[object].Highlight:Destroy()
-        end
-        tableRef[object] = nil
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -50, 0, 30)
+title.Position = UDim2.new(0, 15, 0, 5)
+title.BackgroundTransparency = 1
+title.Text = "TELEKINESIS"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = panel
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 26, 0, 26)
+closeBtn.Position = UDim2.new(1, -35, 0, 6)
+closeBtn.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 16
+closeBtn.Parent = panel
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(1, 0)
+closeCorner.Parent = closeBtn
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 190, 0, 40)
+toggleBtn.Position = UDim2.new(0, 15, 0, 42)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+toggleBtn.Text = "TELEKINESIS: OFF"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextSize = 14
+toggleBtn.Parent = panel
+
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(0, 12)
+toggleCorner.Parent = toggleBtn
+
+local toggleStroke = Instance.new("UIStroke")
+toggleStroke.Color = Color3.fromRGB(150, 100, 255)
+toggleStroke.Thickness = 1.5
+toggleStroke.Parent = toggleBtn
+
+-- ===== Перетаскивание панели (drag), не мешает кнопкам =====
+local dragging = false
+local dragStart, startPos
+
+local function beginDrag(input)
+    dragging = true
+    dragStart = input.Position
+    startPos = panel.Position
+end
+
+local function updateDrag(input)
+    if not dragging then return end
+    local delta = input.Position - dragStart
+    panel.Position = UDim2.new(
+        startPos.X.Scale, startPos.X.Offset + delta.X,
+        startPos.Y.Scale, startPos.Y.Offset + delta.Y
+    )
+end
+
+title.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        beginDrag(input)
+    end
+end)
+
+UIS.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        updateDrag(input)
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+-- ===== Крестик: скрывает панель и выключает весь скрипт =====
+closeBtn.MouseButton1Click:Connect(function()
+    telekinesisActive = false
+    if heldPart then
+        if bv then bv:Destroy() end
+        if bg then bg:Destroy() end
+        heldPart = nil
+    end
+    gui:Destroy()
+end)
+
+-- ===== Логика телекинеза =====
+local function setToggleVisual(active)
+    if active then
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 255)
+        toggleBtn.Text = "TELEKINESIS: ON"
+        toggleStroke.Color = Color3.fromRGB(255, 255, 255)
+    else
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+        toggleBtn.Text = "TELEKINESIS: OFF"
+        toggleStroke.Color = Color3.fromRGB(150, 100, 255)
     end
 end
 
--- Функция создания подсветки
-local function applyHighlight(object, color, tableRef, isEnabled)
-    removeHighlight(object, tableRef)
-    if not isEnabled then return end
+toggleBtn.MouseButton1Click:Connect(function()
+    telekinesisActive = not telekinesisActive
+    setToggleVisual(telekinesisActive)
+    if not telekinesisActive and heldPart then
+        if bv then bv:Destroy() end
+        if bg then bg:Destroy() end
+        heldPart = nil
+    end
+end)
 
+local function grabPart(part)
+    if not part or part.Anchored or part:IsA("Terrain") then return end
+    heldPart = part
+
+    bv = Instance.new("BodyVelocity")
+    bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    bv.Velocity = Vector3.new(0,0,0)
+    bv.Parent = part
+
+    bg = Instance.new("BodyGyro")
+    bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    bg.P = 3000
+    bg.CFrame = part.CFrame
+    bg.Parent = part
+    
     local highlight = Instance.new("Highlight")
-    highlight.FillColor = color
-    highlight.FillTransparency = 0.5
-    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    highlight.OutlineTransparency = 0
-    highlight.Adornee = object
-    highlight.Parent = object
-
-    tableRef[object] = { Highlight = highlight }
+    highlight.Name = "TelekinesisHighlight"
+    highlight.FillColor = Color3.fromRGB(150, 100, 255)
+    highlight.FillTransparency = 0.6
+    highlight.OutlineColor = Color3.fromRGB(200, 150, 255)
+    highlight.Parent = part
 end
 
--- Сканнер игроков (Людей)
-local function updatePlayersESP()
-    for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
-        if player ~= game:GetService("Players").LocalPlayer and player.Character then
-            if ESP_Settings.Players then
-                applyHighlight(player.Character, ESP_Settings.PlayerColor, ActivePlayerESP, true)
-            else
-                removeHighlight(player.Character, ActivePlayerESP)
-            end
-        end
+local function releasePart()
+    if heldPart then
+        local highlight = heldPart:FindFirstChild("TelekinesisHighlight")
+        if highlight then highlight:Destroy() end
+        if bv then bv:Destroy() end
+        if bg then bg:Destroy() end
+        heldPart = nil
     end
 end
 
--- Сканнер Дронов (ищет модели техники/БПЛА в Workspace)
-local function updateDronesESP()
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        -- Поиск объектов по ключевым названиям в игре "БПЛА"
-        if obj:IsA("Model") and (obj.Name:lower():find("drone") or obj.Name:lower():find("бпла") or obj.Name:lower():find("uav") or obj.Name:lower():find("plane")) then
-            if not game:GetService("Players"):GetPlayerFromCharacter(obj) then -- Проверка, что это не игрок
-                if ESP_Settings.Drones then
-                    applyHighlight(obj, ESP_Settings.DroneColor, ActiveDroneESP, true)
-                else
-                    removeHighlight(obj, ActiveDroneESP)
-                end
-            end
-        end
-    end
-end
+-- Клик/тап по объекту — захват или отпускание
+mouse.Button1Down:Connect(function()
+    if not telekinesisActive then return end
 
--- Элементы интерфейса управления
-Tabs.ESP:AddToggle("TogglePlayers", {
-    Title = "Подсветка Людей (Игроков)",
-    Default = false,
-    Callback = function(Value)
-        ESP_Settings.Players = Value
-        updatePlayersESP()
+    if heldPart then
+        releasePart()
+        return
     end
-})
 
-Tabs.ESP:AddToggle("ToggleDrones", {
-    Title = "Подсветка Дронов (Техники)",
-    Default = false,
-    Callback = function(Value)
-        ESP_Settings.Drones = Value
-        if not Value then
-            for obj, _ in pairs(ActiveDroneESP) do removeHighlight(obj, ActiveDroneESP) end
-        else
-            updateDronesESP()
-        end
-    end
-})
-
--- Постоянное обновление в цикле для отслеживания новых игроков и спавна дронов
-task.spawn(function()
-    while task.wait(1) do
-        if ESP_Settings.Players then updatePlayersESP() end
-        if ESP_Settings.Drones then updateDronesESP() end
+    local target = mouse.Target
+    if target and not target.Anchored then
+        grabPart(target)
     end
 end)
 
--- Отслеживание выхода игроков для очистки памяти
-game:GetService("Players").PlayerRemoving:Connect(function(player)
-    if player.Character then removeHighlight(player.Character, ActivePlayerESP) end
+-- Колесо мыши — приближение/отдаление объекта (только для ПК)
+UIS.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseWheel and heldPart then
+        holdDistance = math.clamp(holdDistance + input.Position.Z * 2, 5, 50)
+    end
 end)
 
-Fluent:Notify({
-    Title = "SWILL ESP",
-    Content = "Скрипт переключения ESP готов к работе!",
-    Duration = 5
-})
-Window:SelectTab(1)
+-- Обновление позиции объекта перед камерой
+RunService.RenderStepped:Connect(function(dt)
+    if not telekinesisActive or not heldPart or not bv then return end
+
+    local cam = workspace.CurrentCamera
+    local targetPos = cam.CFrame.Position + cam.CFrame.LookVector * holdDistance
+
+    local currentPos = heldPart.Position
+    local diff = targetPos - currentPos
+    bv.Velocity = diff * 10
+
+    bg.CFrame = CFrame.new(Vector3.new(), cam.CFrame.LookVector)
+end)
