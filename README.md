@@ -2,25 +2,30 @@ local player = game.Players.LocalPlayer
 local mouse = player:GetMouse()
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local Debris = game:GetService("Debris")
+local TweenService = game:GetService("TweenService")
 
-local telekinesisActive = false
-local heldPart = nil
-local bv, bg
+local pullActive = false
+local pulling = false
+local targetPoint = nil
+local bv
 
-local holdDistance = 15
-local minDistance, maxDistance = 5, 60
-local moveSpeed = 10
-local minSpeed, maxSpeed = 2, 30
+local pullSpeed = 15
+local minSpeed, maxSpeed = 5, 60
+local maxRange = 200
+
+local hookBeam, hookAttachment0, hookAttachment1, pointMarker
+local trailAttachment0, trailAttachment1, speedTrail
 
 -- ===== GUI =====
 local gui = Instance.new("ScreenGui")
-gui.Name = "TelekinesisGui"
+gui.Name = "SelfPullGui"
 gui.ResetOnSpawn = false
 gui.Parent = player:WaitForChild("PlayerGui")
 
 local panel = Instance.new("Frame")
-panel.Size = UDim2.new(0, 260, 0, 220)
-panel.Position = UDim2.new(0, 20, 0.45, 0)
+panel.Size = UDim2.new(0, 240, 0, 150)
+panel.Position = UDim2.new(0, 20, 0.55, 0)
 panel.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
 panel.BackgroundTransparency = 0.1
 panel.BorderSizePixel = 0
@@ -32,7 +37,7 @@ panelCorner.CornerRadius = UDim.new(0, 18)
 panelCorner.Parent = panel
 
 local panelStroke = Instance.new("UIStroke")
-panelStroke.Color = Color3.fromRGB(150, 100, 255)
+panelStroke.Color = Color3.fromRGB(100, 200, 255)
 panelStroke.Thickness = 1.5
 panelStroke.Parent = panel
 
@@ -40,7 +45,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -50, 0, 30)
 title.Position = UDim2.new(0, 15, 0, 5)
 title.BackgroundTransparency = 1
-title.Text = "TELEKINESIS"
+title.Text = "GRAPPLE PULL"
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.Font = Enum.Font.GothamBold
 title.TextSize = 16
@@ -62,10 +67,10 @@ closeCorner.CornerRadius = UDim.new(1, 0)
 closeCorner.Parent = closeBtn
 
 local toggleBtn = Instance.new("TextButton")
-toggleBtn.Size = UDim2.new(0, 230, 0, 40)
+toggleBtn.Size = UDim2.new(0, 210, 0, 40)
 toggleBtn.Position = UDim2.new(0, 15, 0, 42)
 toggleBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-toggleBtn.Text = "TELEKINESIS: OFF"
+toggleBtn.Text = "GRAPPLE: OFF"
 toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleBtn.Font = Enum.Font.GothamBold
 toggleBtn.TextSize = 14
@@ -76,36 +81,15 @@ toggleCorner.CornerRadius = UDim.new(0, 12)
 toggleCorner.Parent = toggleBtn
 
 local toggleStroke = Instance.new("UIStroke")
-toggleStroke.Color = Color3.fromRGB(150, 100, 255)
+toggleStroke.Color = Color3.fromRGB(100, 200, 255)
 toggleStroke.Thickness = 1.5
 toggleStroke.Parent = toggleBtn
 
--- Кнопка "Оттолкнуть"
-local pushBtn = Instance.new("TextButton")
-pushBtn.Size = UDim2.new(0, 230, 0, 40)
-pushBtn.Position = UDim2.new(0, 15, 0, 90)
-pushBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-pushBtn.Text = "PUSH 💥"
-pushBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-pushBtn.Font = Enum.Font.GothamBold
-pushBtn.TextSize = 14
-pushBtn.Parent = panel
-
-local pushCorner = Instance.new("UICorner")
-pushCorner.CornerRadius = UDim.new(0, 12)
-pushCorner.Parent = pushBtn
-
-local pushStroke = Instance.new("UIStroke")
-pushStroke.Color = Color3.fromRGB(255, 120, 80)
-pushStroke.Thickness = 1.5
-pushStroke.Parent = pushBtn
-
--- ===== Слайдер: Скорость =====
 local speedLabel = Instance.new("TextLabel")
-speedLabel.Size = UDim2.new(0, 230, 0, 18)
-speedLabel.Position = UDim2.new(0, 15, 0, 140)
+speedLabel.Size = UDim2.new(0, 210, 0, 18)
+speedLabel.Position = UDim2.new(0, 15, 0, 90)
 speedLabel.BackgroundTransparency = 1
-speedLabel.Text = "Speed: " .. moveSpeed
+speedLabel.Text = "Pull Speed: " .. pullSpeed
 speedLabel.TextColor3 = Color3.fromRGB(255,255,255)
 speedLabel.Font = Enum.Font.Gotham
 speedLabel.TextSize = 13
@@ -113,8 +97,8 @@ speedLabel.TextXAlignment = Enum.TextXAlignment.Left
 speedLabel.Parent = panel
 
 local speedBack = Instance.new("Frame")
-speedBack.Size = UDim2.new(0, 230, 0, 10)
-speedBack.Position = UDim2.new(0, 15, 0, 160)
+speedBack.Size = UDim2.new(0, 210, 0, 10)
+speedBack.Position = UDim2.new(0, 15, 0, 110)
 speedBack.BackgroundColor3 = Color3.fromRGB(55, 55, 65)
 speedBack.Parent = panel
 
@@ -123,8 +107,8 @@ speedBackCorner.CornerRadius = UDim.new(1, 0)
 speedBackCorner.Parent = speedBack
 
 local speedFill = Instance.new("Frame")
-speedFill.Size = UDim2.new((moveSpeed - minSpeed) / (maxSpeed - minSpeed), 0, 1, 0)
-speedFill.BackgroundColor3 = Color3.fromRGB(150, 100, 255)
+speedFill.Size = UDim2.new((pullSpeed - minSpeed) / (maxSpeed - minSpeed), 0, 1, 0)
+speedFill.BackgroundColor3 = Color3.fromRGB(100, 200, 255)
 speedFill.Parent = speedBack
 
 local speedFillCorner = Instance.new("UICorner")
@@ -134,55 +118,13 @@ speedFillCorner.Parent = speedFill
 local speedKnob = Instance.new("Frame")
 speedKnob.Size = UDim2.new(0, 16, 0, 16)
 speedKnob.AnchorPoint = Vector2.new(0.5, 0.5)
-speedKnob.Position = UDim2.new((moveSpeed - minSpeed) / (maxSpeed - minSpeed), 0, 0.5, 0)
+speedKnob.Position = UDim2.new((pullSpeed - minSpeed) / (maxSpeed - minSpeed), 0, 0.5, 0)
 speedKnob.BackgroundColor3 = Color3.fromRGB(255,255,255)
 speedKnob.Parent = speedBack
 
 local speedKnobCorner = Instance.new("UICorner")
 speedKnobCorner.CornerRadius = UDim.new(1, 0)
 speedKnobCorner.Parent = speedKnob
-
--- ===== Слайдер: Дальность =====
-local distLabel = Instance.new("TextLabel")
-distLabel.Size = UDim2.new(0, 230, 0, 18)
-distLabel.Position = UDim2.new(0, 15, 0, 180)
-distLabel.BackgroundTransparency = 1
-distLabel.Text = "Distance: " .. holdDistance
-distLabel.TextColor3 = Color3.fromRGB(255,255,255)
-distLabel.Font = Enum.Font.Gotham
-distLabel.TextSize = 13
-distLabel.TextXAlignment = Enum.TextXAlignment.Left
-distLabel.Parent = panel
-
-local distBack = Instance.new("Frame")
-distBack.Size = UDim2.new(0, 230, 0, 10)
-distBack.Position = UDim2.new(0, 15, 0, 200)
-distBack.BackgroundColor3 = Color3.fromRGB(55, 55, 65)
-distBack.Parent = panel
-
-local distBackCorner = Instance.new("UICorner")
-distBackCorner.CornerRadius = UDim.new(1, 0)
-distBackCorner.Parent = distBack
-
-local distFill = Instance.new("Frame")
-distFill.Size = UDim2.new((holdDistance - minDistance) / (maxDistance - minDistance), 0, 1, 0)
-distFill.BackgroundColor3 = Color3.fromRGB(150, 100, 255)
-distFill.Parent = distBack
-
-local distFillCorner = Instance.new("UICorner")
-distFillCorner.CornerRadius = UDim.new(1, 0)
-distFillCorner.Parent = distFill
-
-local distKnob = Instance.new("Frame")
-distKnob.Size = UDim2.new(0, 16, 0, 16)
-distKnob.AnchorPoint = Vector2.new(0.5, 0.5)
-distKnob.Position = UDim2.new((holdDistance - minDistance) / (maxDistance - minDistance), 0, 0.5, 0)
-distKnob.BackgroundColor3 = Color3.fromRGB(255,255,255)
-distKnob.Parent = distBack
-
-local distKnobCorner = Instance.new("UICorner")
-distKnobCorner.CornerRadius = UDim.new(1, 0)
-distKnobCorner.Parent = distKnob
 
 -- ===== Перетаскивание панели =====
 local dragging = false
@@ -212,179 +154,215 @@ UIS.InputEnded:Connect(function(input)
     end
 end)
 
--- ===== Логика слайдеров (обобщённая функция) =====
-local function setupSlider(back, fill, knob, minVal, maxVal, onChange)
-    local draggingThis = false
+-- ===== Слайдер =====
+local draggingSlider = false
 
-    local function update(inputPos)
-        local relX = math.clamp((inputPos.X - back.AbsolutePosition.X) / back.AbsoluteSize.X, 0, 1)
-        local val = minVal + relX * (maxVal - minVal)
-        fill.Size = UDim2.new(relX, 0, 1, 0)
-        knob.Position = UDim2.new(relX, 0, 0.5, 0)
-        onChange(val)
-    end
-
-    knob.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            draggingThis = true
-        end
-    end)
-    back.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            draggingThis = true
-            update(input.Position)
-        end
-    end)
-    UIS.InputChanged:Connect(function(input)
-        if draggingThis and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            update(input.Position)
-        end
-    end)
-    UIS.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            draggingThis = false
-        end
-    end)
+local function updateSpeedSlider(inputPos)
+    local relX = math.clamp((inputPos.X - speedBack.AbsolutePosition.X) / speedBack.AbsoluteSize.X, 0, 1)
+    pullSpeed = minSpeed + relX * (maxSpeed - minSpeed)
+    speedFill.Size = UDim2.new(relX, 0, 1, 0)
+    speedKnob.Position = UDim2.new(relX, 0, 0.5, 0)
+    speedLabel.Text = "Pull Speed: " .. math.floor(pullSpeed)
 end
 
-setupSlider(speedBack, speedFill, speedKnob, minSpeed, maxSpeed, function(val)
-    moveSpeed = val
-    speedLabel.Text = "Speed: " .. math.floor(val)
-end)
-
-setupSlider(distBack, distFill, distKnob, minDistance, maxDistance, function(val)
-    holdDistance = val
-    distLabel.Text = "Distance: " .. math.floor(val)
-end)
-
--- ===== Крестик =====
-local function releasePart()
-    if heldPart then
-        local highlight = heldPart:FindFirstChild("TelekinesisHighlight")
-        if highlight then highlight:Destroy() end
-        if bv then bv:Destroy() end
-        if bg then bg:Destroy() end
-        heldPart = nil
+speedKnob.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingSlider = true
     end
+end)
+speedBack.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingSlider = true
+        updateSpeedSlider(input.Position)
+    end
+end)
+UIS.InputChanged:Connect(function(input)
+    if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        updateSpeedSlider(input.Position)
+    end
+end)
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingSlider = false
+    end
+end)
+
+-- ===== Визуальные эффекты крюка =====
+local function createHookVisual(hrp, hitPos)
+    pointMarker = Instance.new("Part")
+    pointMarker.Shape = Enum.PartType.Ball
+    pointMarker.Size = Vector3.new(0.6, 0.6, 0.6)
+    pointMarker.Position = hitPos
+    pointMarker.Anchored = true
+    pointMarker.CanCollide = false
+    pointMarker.Material = Enum.Material.Neon
+    pointMarker.Color = Color3.fromRGB(100, 200, 255)
+    pointMarker.Parent = workspace
+
+    local mesh = Instance.new("SpecialMesh")
+    mesh.MeshType = Enum.MeshType.Sphere
+    mesh.Parent = pointMarker
+
+    local flash = pointMarker:Clone()
+    flash.Size = Vector3.new(1,1,1)
+    flash.Transparency = 0.2
+    flash.Parent = workspace
+    local flashTween = TweenService:Create(flash, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Size = Vector3.new(4,4,4),
+        Transparency = 1
+    })
+    flashTween:Play()
+    Debris:AddItem(flash, 0.35)
+
+    hookAttachment0 = Instance.new("Attachment")
+    hookAttachment0.Parent = hrp
+
+    hookAttachment1 = Instance.new("Attachment")
+    hookAttachment1.Parent = pointMarker
+
+    hookBeam = Instance.new("Beam")
+    hookBeam.Attachment0 = hookAttachment0
+    hookBeam.Attachment1 = hookAttachment1
+    hookBeam.Width0 = 0.15
+    hookBeam.Width1 = 0.15
+    hookBeam.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 200, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 230, 255))
+    })
+    hookBeam.Transparency = NumberSequence.new(0.2)
+    hookBeam.FaceCamera = true
+    hookBeam.Parent = hrp
 end
 
-closeBtn.MouseButton1Click:Connect(function()
-    telekinesisActive = false
-    releasePart()
-    gui:Destroy()
-end)
+local function destroyHookVisual()
+    if hookBeam then hookBeam:Destroy(); hookBeam = nil end
+    if hookAttachment0 then hookAttachment0:Destroy(); hookAttachment0 = nil end
+    if hookAttachment1 then hookAttachment1:Destroy(); hookAttachment1 = nil end
+    if pointMarker then pointMarker:Destroy(); pointMarker = nil end
+end
 
--- ===== Toggle =====
+local function createSpeedTrail(hrp)
+    trailAttachment0 = Instance.new("Attachment")
+    trailAttachment0.Position = Vector3.new(0, 1, 0)
+    trailAttachment0.Parent = hrp
+
+    trailAttachment1 = Instance.new("Attachment")
+    trailAttachment1.Position = Vector3.new(0, -1, 0)
+    trailAttachment1.Parent = hrp
+
+    speedTrail = Instance.new("Trail")
+    speedTrail.Attachment0 = trailAttachment0
+    speedTrail.Attachment1 = trailAttachment1
+    speedTrail.Lifetime = 0.3
+    speedTrail.Color = ColorSequence.new(Color3.fromRGB(100, 200, 255))
+    speedTrail.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.3),
+        NumberSequenceKeypoint.new(1, 1)
+    })
+    speedTrail.WidthScale = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 1),
+        NumberSequenceKeypoint.new(1, 0)
+    })
+    speedTrail.Parent = hrp
+end
+
+local function destroySpeedTrail()
+    if speedTrail then speedTrail:Destroy(); speedTrail = nil end
+    if trailAttachment0 then trailAttachment0:Destroy(); trailAttachment0 = nil end
+    if trailAttachment1 then trailAttachment1:Destroy(); trailAttachment1 = nil end
+end
+
+-- ===== Toggle / Stop =====
 local function setToggleVisual(active)
     if active then
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 255)
-        toggleBtn.Text = "TELEKINESIS: ON"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 255)
+        toggleBtn.Text = "GRAPPLE: ON"
         toggleStroke.Color = Color3.fromRGB(255, 255, 255)
     else
         toggleBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-        toggleBtn.Text = "TELEKINESIS: OFF"
-        toggleStroke.Color = Color3.fromRGB(150, 100, 255)
+        toggleBtn.Text = "GRAPPLE: OFF"
+        toggleStroke.Color = Color3.fromRGB(100, 200, 255)
     end
+end
+
+local function stopPull()
+    pulling = false
+    targetPoint = nil
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local existing = hrp:FindFirstChild("PullVelocity")
+        if existing then existing:Destroy() end
+    end
+    destroyHookVisual()
+    destroySpeedTrail()
 end
 
 toggleBtn.MouseButton1Click:Connect(function()
-    telekinesisActive = not telekinesisActive
-    setToggleVisual(telekinesisActive)
-    if not telekinesisActive then releasePart() end
+    pullActive = not pullActive
+    setToggleVisual(pullActive)
+    if not pullActive then stopPull() end
 end)
 
--- ===== Захват объекта =====
-local function grabPart(part)
-    if not part or part.Anchored or part:IsA("Terrain") then return end
+closeBtn.MouseButton1Click:Connect(function()
+    pullActive = false
+    stopPull()
+    gui:Destroy()
+end)
 
-    local model = part:FindFirstAncestorOfClass("Model")
-    if model and model.PrimaryPart then
-        part = model.PrimaryPart
-    end
+-- ===== Клик — точка притяжения =====
+mouse.Button1Down:Connect(function()
+    if not pullActive then return end
 
-    heldPart = part
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
 
-    local totalMass = part:GetMass()
-    if totalMass < 1 then totalMass = 1 end
+    local hitPos = mouse.Hit and mouse.Hit.Position
+    if not hitPos then return end
+
+    if (hitPos - hrp.Position).Magnitude > maxRange then return end
+
+    targetPoint = hitPos
+    pulling = true
+
+    local bvExisting = hrp:FindFirstChild("PullVelocity")
+    if bvExisting then bvExisting:Destroy() end
 
     bv = Instance.new("BodyVelocity")
+    bv.Name = "PullVelocity"
     bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
     bv.Velocity = Vector3.new(0,0,0)
-    bv.Parent = part
+    bv.Parent = hrp
 
-    bg = Instance.new("BodyGyro")
-    bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    bg.P = math.max(3000, totalMass * 500)
-    bg.CFrame = part.CFrame
-    bg.Parent = part
+    destroyHookVisual()
+    createHookVisual(hrp, hitPos)
+    createSpeedTrail(hrp)
+end)
 
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "TelekinesisHighlight"
-    highlight.FillColor = Color3.fromRGB(150, 100, 255)
-    highlight.FillTransparency = 0.6
-    highlight.OutlineColor = Color3.fromRGB(200, 150, 255)
-    highlight.Parent = part
-end
+mouse.Button2Down:Connect(function()
+    if pulling then stopPull() end
+end)
 
-mouse.Button1Down:Connect(function()
-    if not telekinesisActive then return end
-    if heldPart then
-        releasePart()
+-- ===== Полёт к точке =====
+RunService.RenderStepped:Connect(function(dt)
+    if not pulling or not targetPoint then return end
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChild("Humanoid")
+    if not hrp or not hum then stopPull(); return end
+
+    local bvCurrent = hrp:FindFirstChild("PullVelocity")
+    if not bvCurrent then stopPull(); return end
+
+    local diff = targetPoint - hrp.Position
+    local dist = diff.Magnitude
+
+    if dist < 3 then
+        stopPull()
         return
     end
-    local target = mouse.Target
-    if target and not target.Anchored then
-        grabPart(target)
-    end
-end)
 
--- Колесо мыши — тоже меняет дальность (для ПК, вдобавок к слайдеру)
-UIS.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseWheel and heldPart then
-        holdDistance = math.clamp(holdDistance + input.Position.Z * 2, minDistance, maxDistance)
-        local relX = (holdDistance - minDistance) / (maxDistance - minDistance)
-        distFill.Size = UDim2.new(relX, 0, 1, 0)
-        distKnob.Position = UDim2.new(relX, 0, 0.5, 0)
-        distLabel.Text = "Distance: " .. math.floor(holdDistance)
-    end
-end)
-
--- ===== Кнопка PUSH (отталкивание) =====
-pushBtn.MouseButton1Click:Connect(function()
-    if not heldPart or not bv then return end
-    local cam = workspace.CurrentCamera
-    local pushForce = 80 + moveSpeed * 5
-
-    -- Импульс от камеры вперёд
-    bv.Velocity = cam.CFrame.LookVector * pushForce
-
-    -- Отпускаем объект сразу после толчка, чтобы он улетел свободно
-    task.delay(0.05, function()
-        releasePart()
-    end)
-end)
-
--- ===== Плавное перемещение объекта (пружина, без рывков) =====
-local currentVelocity = Vector3.new(0,0,0)
-
-RunService.RenderStepped:Connect(function(dt)
-    if not telekinesisActive or not heldPart or not bv then return end
-
-    local cam = workspace.CurrentCamera
-    local targetPos = cam.CFrame.Position + cam.CFrame.LookVector * holdDistance
-    local currentPos = heldPart.Position
-
-    local diff = targetPos - currentPos
-    local mass = heldPart:GetMass()
-
-    -- Пружинная модель: сила пропорциональна расстоянию, демпфирование гасит колебания
-    local springStrength = moveSpeed * 4
-    local damping = moveSpeed * 0.6
-
-    local desiredVelocity = diff * springStrength
-    currentVelocity = currentVelocity:Lerp(desiredVelocity, math.clamp(dt * damping, 0, 1))
-
-    bv.Velocity = currentVelocity
-
-    bg.CFrame = CFrame.new(Vector3.new(), cam.CFrame.LookVector)
+    bvCurrent.Velocity = diff.Unit * pullSpeed
 end)
